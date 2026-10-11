@@ -1,0 +1,246 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#5546d7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Révise+">
+<link rel="manifest" href="./manifest.json">
+<title>Révise+</title>
+<style>
+:root{--p:#5546d7;--bg:#f5f5fb;--ink:#202039;--muted:#77778c;--line:#e8e7f1}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px -apple-system,BlinkMacSystemFont,sans-serif}
+header{background:var(--p);color:white;padding:calc(env(safe-area-inset-top) + 18px) 20px 22px}
+header h1{margin:0;font-size:27px}header p{margin:5px 0 0;opacity:.85;font-size:14px}
+main{max-width:650px;margin:auto;padding:16px 15px 100px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;background:#ffffffed;border-top:1px solid var(--line);padding:10px 4px calc(env(safe-area-inset-bottom) + 8px);z-index:5}
+nav button{border:0;background:none;color:var(--muted);font-size:12px;padding:6px}
+nav button b{display:block;font-size:20px;margin-bottom:3px}
+nav button.active{color:var(--p)}
+h2{font-size:21px;margin:8px 0 14px}h3{font-size:16px;margin:0 0 8px}
+.card{background:white;border:1px solid var(--line);border-radius:17px;padding:16px;margin-bottom:13px;box-shadow:0 2px 8px #26204c06}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.big{font-size:28px;font-weight:750;margin-top:5px}
+.muted{color:var(--muted);font-size:13px}
+input,select{width:100%;padding:13px;border:1px solid #dcdbea;border-radius:11px;background:white;font:inherit;color:var(--ink);margin:6px 0 10px}
+button{cursor:pointer}
+.primary,.grade{border:0;border-radius:11px;padding:12px;font:inherit;font-weight:650}
+.primary{background:var(--p);color:white;width:100%}
+.row{display:flex;align-items:center;gap:10px}
+.row .grow{flex:1;min-width:0}
+.course{padding:13px 0;border-bottom:1px solid var(--line)}
+.course:last-child{border-bottom:0}
+.course-name{font-weight:650;overflow-wrap:anywhere}
+.pill{font-size:11px;border-radius:30px;padding:5px 8px;background:#f0efff;color:var(--p);white-space:nowrap}
+.grades{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:11px}
+.grade{font-size:13px;padding:12px 4px}
+.hard{background:#fff0e8;color:#a44c12}.good{background:#e9f8ee;color:#197341}.easy{background:#efedff;color:#5142c7}
+.days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;text-align:center}
+.day{border:0;border-radius:10px;background:transparent;min-height:46px;font:inherit;padding:5px 0;color:var(--ink)}
+.day .dot{display:block;color:var(--p);font-size:10px;min-height:12px}
+.day.selected{background:var(--p);color:white}.day.selected .dot{color:white}
+.day.muted-day{color:#b6b5c4}
+.month-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.month-head button{border:1px solid var(--line);border-radius:9px;background:white;padding:8px 13px}
+.empty{text-align:center;color:var(--muted);padding:22px 8px;font-size:14px}
+.danger{color:#b42318;background:#fff0ef}
+.smallbtn{border:1px solid var(--line);background:white;border-radius:9px;padding:8px 10px;color:var(--ink)}
+label{font-size:13px;font-weight:600}
+.hidden{display:none!important}
+footer{text-align:center;color:var(--muted);font-size:11px;padding:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Révise+</h1>
+  <p>Moins d'organisation, plus de mémorisation.</p>
+</header>
+<main id="app"></main>
+<nav>
+  <button data-tab="today" class="active"><b>☀</b>Aujourd'hui</button>
+  <button data-tab="calendar"><b>▦</b>Calendrier</button>
+  <button data-tab="courses"><b>▤</b>Mes cours</button>
+  <button data-tab="settings"><b>⚙</b>Options</button>
+</nav>
+<script>
+(() => {
+"use strict";
+const KEY="revisePlus.v1";
+const $=s=>document.querySelector(s);
+const app=$("#app");
+const today=()=>dateKey(new Date());
+const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const parseDate=s=>{const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d,12)};
+const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};
+const fmt=s=>parseDate(s).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"});
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const norm=s=>s.trim().toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ");
+let state=load(),tab="today",month=new Date(),selected=today(),reviewId=null;
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.courses))return s}catch(e){}return {courses:[]}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state));return true}catch(e){alert("Sauvegarde impossible. Exporte tes données et libère de l'espace.");return false}}
+function id(){return crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2)}
+function due(c){return c.next}
+function pending(c,day=today()){return !c.history.length||c.next<=day}
+function sortedPending(day=today()){return state.courses.filter(c=>pending(c,day)).sort((a,b)=>a.next.localeCompare(b.next))}
+function overdue(c,day=today()){return c.next<day}
+function durationDays(ms){return Math.max(1,Math.round(ms/86400000))}
+function nextInterval(c,rating){
+  // Ordonnanceur adaptatif simplifié, inspiré des principes FSRS.
+  // Ce n'est pas l'algorithme FSRS officiel.
+  const previous=c.interval||0;
+  const last=c.history[c.history.length-1];
+  if(rating==="hard"){
+    return Math.max(1,Math.round(previous===0?1:previous*0.65));
+  }
+  if(rating==="good"){
+    if(previous===0)return 3;
+    if(previous===1)return 3;
+    return Math.max(previous+1,Math.round(previous*1.8));
+  }
+  if(previous===0)return 4;
+  return Math.max(previous+2,Math.round(previous*2.5));
+}
+function addCourse(name){
+  name=name.trim();if(!name)return;
+  const existing=state.courses.find(c=>norm(c.name)===norm(name));
+  if(existing){reviewId=existing.id;render();return}
+  const c={id:id(),name,created:today(),next:today(),interval:0,history:[]};
+  state.courses.push(c);save();reviewId=c.id;tab="today";render();
+}
+function review(courseId,rating){
+  const c=state.courses.find(x=>x.id===courseId);if(!c)return;
+  const date=today();
+  // Une seule réponse par cours et par jour : évite de repousser l'échéance
+  // plusieurs fois par erreur. On autorise une nouvelle réponse si besoin.
+  const last=c.history[c.history.length-1];
+  if(last&&last.date===date){
+    if(!confirm("Ce cours a déjà été évalué aujourd'hui. Remplacer cette évaluation ?"))return;
+    c.history.pop();
+  }
+  const days=nextInterval(c,rating);
+  c.history.push({date,rating,interval:days});
+  c.interval=days;c.next=addDays(date,days);
+  save();reviewId=null;render();
+}
+function dueCount(day){return state.courses.filter(c=>c.next<=day).length}
+function cardCourse(c,showReview=true){
+  const late=overdue(c);
+  const isToday=c.next===today();
+  return `<div class="course">
+    <div class="row"><div class="grow"><div class="course-name">${esc(c.name)}</div>
+    <div class="muted">${c.history.length?`Révisé ${fmt(c.history[c.history.length-1].date)} · ${c.history.length} session(s)`:"Nouveau cours · première révision"}</div>
+    <div class="muted">${late?`En retard depuis le ${fmt(c.next)}`:isToday?"À réviser aujourd'hui":`Prochaine révision : ${fmt(c.next)}`}</div></div>
+    <span class="pill">${c.history.length?`R${c.history.length+1}`:"Nouveau"}</span></div>
+    ${showReview?`<div class="grades">
+      <button class="grade hard" data-grade="hard" data-id="${c.id}">Difficile</button>
+      <button class="grade good" data-grade="good" data-id="${c.id}">Correct</button>
+      <button class="grade easy" data-grade="easy" data-id="${c.id}">Facile</button>
+    </div>`:""}
+    <div class="row" style="margin-top:9px">
+      <button class="smallbtn" data-history="${c.id}">Historique</button>
+      <button class="smallbtn" data-rename="${c.id}">Renommer</button>
+      <button class="smallbtn" data-delete="${c.id}">Supprimer</button>
+    </div></div>`;
+}
+function todayView(){
+ const list=sortedPending(),done=state.courses.filter(c=>c.history.length&&c.history[c.history.length-1].date===today());
+ return `<h2>Aujourd'hui</h2>
+ <div class="stats"><div class="card"><div class="muted">À réviser</div><div class="big">${list.length}</div></div>
+ <div class="card"><div class="muted">Terminés aujourd'hui</div><div class="big">${done.length}</div></div></div>
+ <div class="card"><h3>Ajouter un cours révisé</h3>
+ <form id="add"><input id="courseName" maxlength="180" placeholder="Ex. : Physiologie cardiovasculaire" autocomplete="off" required><button class="primary">Ajouter / enregistrer</button></form>
+ <div class="muted">Un cours déjà connu sera reconnu automatiquement.</div></div>
+ <h3>Ton programme</h3>
+ ${list.length?list.map(c=>cardCourse(c)).join(""):'<div class="card empty">Tout est à jour ! Tu peux ajouter un cours ci-dessus.</div>'}
+ <footer>Les cours en retard restent dans la liste jusqu'à leur révision.</footer>`;
+}
+function calendarView(){
+ const y=month.getFullYear(),m=month.getMonth(),first=new Date(y,m,1,12),offset=(first.getDay()+6)%7;
+ const days=new Date(y,m+1,0,12).getDate();
+ const prev=()=>{month=new Date(y,m-1,1,12);render()};
+ const next=()=>{month=new Date(y,m+1,1,12);render()};
+ let html=`<h2>Calendrier</h2><div class="card"><div class="month-head"><button id="prev">‹</button><h3>${month.toLocaleDateString("fr-FR",{month:"long",year:"numeric"})}</h3><button id="next">›</button></div><div class="days">${["L","M","M","J","V","S","D"].map(x=>`<div class="muted">${x}</div>`).join("")}`;
+ for(let i=0;i<offset;i++)html+='<div></div>';
+ for(let d=1;d<=days;d++){
+  const key=dateKey(new Date(y,m,d,12)),n=dueCount(key);
+  html+=`<button class="day ${key===selected?"selected":""}" data-day="${key}">${d}<span class="dot">${n?n+" •":""}</span></button>`;
+ }
+ html+=`</div></div><h3>Révisions du ${fmt(selected)}</h3>`;
+ const courses=state.courses.filter(c=>c.next<=selected).sort((a,b)=>a.next.localeCompare(b.next));
+ html+=courses.length?courses.map(c=>cardCourse(c,true)).join(""):'<div class="card empty">Aucune révision échue à cette date.</div>';
+ return html;
+}
+function coursesView(){
+ const courses=[...state.courses].sort((a,b)=>a.name.localeCompare(b.name,"fr"));
+ return `<h2>Mes cours</h2><div class="card"><form id="add"><input id="courseName" maxlength="180" placeholder="Nom d'un nouveau cours" required><button class="primary">Ajouter un cours</button></form></div>
+ ${courses.length?courses.map(c=>cardCourse(c,false)).join(""):'<div class="card empty">Tes cours apparaîtront ici.</div>'}`;
+}
+function settingsView(){
+ return `<h2>Options et sauvegarde</h2><div class="card"><h3>Exporter tes données</h3><p class="muted">Télécharge un fichier JSON contenant tes cours, tes échéances et leur historique.</p><button class="primary" id="export">Exporter la sauvegarde</button></div>
+ <div class="card"><h3>Importer une sauvegarde</h3><p class="muted">L'import remplace les données actuelles. Fais d'abord un export si nécessaire.</p><input type="file" id="importFile" accept=".json,application/json"></div>
+ <div class="card"><h3>À propos de l'algorithme</h3><p class="muted">Cette version utilise des intervalles adaptatifs simplifiés. Les échéances peuvent s'étendre sur plusieurs années, mais ce n'est pas encore FSRS officiel.</p></div>
+ <div class="card"><h3>Réinitialiser</h3><p class="muted">Supprime définitivement les données locales de cette application.</p><button class="primary danger" id="reset">Effacer tous les cours</button></div>`;
+}
+function render(){
+ document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+ app.innerHTML=tab==="today"?todayView():tab==="calendar"?calendarView():tab==="courses"?coursesView():settingsView();
+ const form=$("#add");if(form)form.addEventListener("submit",e=>{e.preventDefault();addCourse($("#courseName").value)});
+ $("#prev")?.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1,12);render()});
+ $("#next")?.addEventListener("click",()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1,12);render()});
+ $("#export")?.addEventListener("click",exportData);
+ $("#importFile")?.addEventListener("change",importData);
+ $("#reset")?.addEventListener("click",()=>{if(confirm("Effacer tous les cours et leur historique ? Cette action est irréversible.")){state={courses:[]};save();render()}});
+ app.querySelectorAll("[data-grade]").forEach(b=>b.addEventListener("click",()=>review(b.dataset.id,b.dataset.grade)));
+ app.querySelectorAll("[data-day]").forEach(b=>b.addEventListener("click",()=>{selected=b.dataset.day;render()}));
+ app.querySelectorAll("[data-history]").forEach(b=>b.addEventListener("click",()=>showHistory(b.dataset.history)));
+ app.querySelectorAll("[data-rename]").forEach(b=>b.addEventListener("click",()=>rename(b.dataset.rename)));
+ app.querySelectorAll("[data-delete]").forEach(b=>b.addEventListener("click",()=>removeCourse(b.dataset.delete)));
+}
+function showHistory(cid){
+ const c=state.courses.find(x=>x.id===cid);if(!c)return;
+ alert(c.name+"\n\n"+(c.history.length?c.history.map((h,i)=>`${i+1}. ${fmt(h.date)} — ${({hard:"Difficile",good:"Correct",easy:"Facile"}[h.rating])} — intervalle suivant : ${h.interval} j`).join("\n"):"Aucune révision enregistrée.")+"\n\nProchaine échéance : "+fmt(c.next));
+}
+function rename(cid){
+ const c=state.courses.find(x=>x.id===cid);if(!c)return;
+ const name=prompt("Nouveau nom du cours :",c.name);if(!name||!name.trim())return;
+ const duplicate=state.courses.find(x=>x.id!==cid&&norm(x.name)===norm(name));
+ if(duplicate){alert("Un cours portant ce nom existe déjà.");return}
+ c.name=name.trim();save();render();
+}
+function removeCourse(cid){
+ const c=state.courses.find(x=>x.id===cid);if(!c)return;
+ if(confirm(`Supprimer « ${c.name} » et tout son historique ?`)){state.courses=state.courses.filter(x=>x.id!==cid);save();render()}
+}
+function exportData(){
+ const blob=new Blob([JSON.stringify({app:"Revise+",version:1,exportedAt:new Date().toISOString(),...state},null,2)],{type:"application/json"});
+ const url=URL.createObjectURL(blob),a=document.createElement("a");
+ a.href=url;a.download="revise-plus-sauvegarde-"+today()+".json";a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function importData(e){
+ const file=e.target.files[0];if(!file)return;
+ const reader=new FileReader();
+ reader.onload=()=>{
+  try{
+   const data=JSON.parse(reader.result);
+   if(!data||!Array.isArray(data.courses)||!data.courses.every(c=>c.id&&typeof c.name==="string"&&typeof c.next==="string"&&Array.isArray(c.history)))throw Error();
+   if(!confirm("Remplacer toutes les données actuelles par cette sauvegarde ?"))return;
+   state={courses:data.courses};save();render();alert("Sauvegarde importée.");
+  }catch(err){alert("Fichier invalide ou incompatible. Aucune donnée importée.")}
+ };
+ reader.readAsText(file);e.target.value="";
+}
+document.querySelectorAll("nav button").forEach(b=>b.addEventListener("click",()=>{tab=b.dataset.tab;render()}));
+if("serviceWorker" in navigator && location.protocol!=="file:"){
+ navigator.serviceWorker.register("./sw.js").catch(()=>{});
+}
+render();
+})();
+</script>
+</main>
+</body>
+</html>
